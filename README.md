@@ -6,11 +6,11 @@
 
 ## Key Features
 
-### 🧠 On-Device Semantic Image Segmentation
+### On-Device Semantic Image Segmentation
 * **TensorFlow Lite Models**: Real-time pixel-level semantic segmentation using models trained on **Cityscapes** and **PASCAL VOC** datasets (`shufflenetv2`, `deeplabv3`).
 * **High-Speed Inference**: Direct output tensor evaluation on background threads with zero UI latency and optional TFLite GPU acceleration.
 
-### 🧭 Spatial Directional Guidance & Zone Analysis
+### Spatial Directional Guidance & Zone Analysis
 * **5-Zone Corridor Scanning**: Subdivides the walking path into 5 scanning columns (*Far-Left*, *Mid-Left*, *Center*, *Mid-Right*, *Far-Right*) for precise directional guidance.
 * **Spatial Spoken Feedback**: Announces directional hazard states:
   * *"Path clear ahead"*
@@ -18,14 +18,14 @@
   * *"Obstacle on left"* / *"Obstacle on right"*
   * *"Path blocked"*
 
-### 🚪 Tight Space & Doorway Alignment Cues
+### Tight Space & Doorway Alignment Cues
 * **Narrow Passage Detection**: Identifies narrow corridors, aisles, and doorways flanked by side walls or doorframes.
 * **Micro-Alignment Prompts**: Spoken and haptic instructions to center the user through tight fits:
   * *"Narrow passage centered. Walk straight."*
   * *"Tight space. Shift left."*
   * *"Tight space. Shift right."*
 
-### 📳 Tactile Haptic Vibration Feedback
+### Tactile Haptic Vibration Feedback
 * **Multimodal Vibration Patterns**: Delivers distinct tactile cues for quiet mode or noisy outdoor environments:
   * **Blocked / Severe Danger**: Double strong vibration pulse.
   * **Directional Obstacles**: Single medium pulse.
@@ -40,7 +40,7 @@
   * **Translucent Red Hazard Shading**: Highlights blocked walking areas in real time.
 * **Doorway Alignment Guide**: Dashed cyan overlay corridor highlighting narrow passage alignment.
 
-### 🖐️ Blind Accessibility & Gestures
+### Blind Accessibility & Gestures
 * **Full-Screen Touch Gestures**:
   * **Single Tap**: Instantly repeats current spatial status aloud on demand.
   * **Double Tap**: Toggles between **Voice + Haptic** mode and **Silent Haptic-Only** mode.
