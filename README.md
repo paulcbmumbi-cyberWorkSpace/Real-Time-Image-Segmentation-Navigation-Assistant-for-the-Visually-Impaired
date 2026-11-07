@@ -1,114 +1,115 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body>
+# Uriel - Real-Time Image Segmentation & Navigation Assistant for the Visually Impaired
 
-<h1>Object Detection and Avoidance App for the Visually Impaired</h1>
+**Uriel** is an Android accessibility application designed to empower visually impaired individuals to navigate indoor and outdoor environments safely. Using on-device **TensorFlow Lite Image Segmentation**, multi-zone spatial analysis, directional Text-To-Speech (TTS), tactile haptic feedback, and automotive-style reversing trajectory overlays, the app provides real-time guidance through open paths, obstacles, doorways, and tight spaces.
 
-<p>This Android application is designed to assist visually impaired individuals by detecting objects in their path and providing real-time audio feedback to avoid obstacles. The app uses <strong>TensorFlow Lite</strong> for object detection and <strong>CameraX</strong> for capturing live video feed from the device's camera. Detected objects are announced through Text-to-Speech (TTS), helping users navigate their surroundings safely.</p>
+---
 
-<h2>Features</h2>
-<ul>
-    <li><strong>Real-time Object Detection</strong>: Uses TensorFlow Lite to detect objects from the device's camera feed.</li>
-    <li><strong>Obstacle Warning</strong>: Provides real-time audio feedback (Text-to-Speech) when obstacles are detected ahead.</li>
-    <li><strong>Lightweight</strong>: TensorFlow Lite ensures efficient model inference with low latency.</li>
-    <li><strong>Easy to Use</strong>: Automatically starts camera feed and provides feedback without the need for manual intervention.</li>
-</ul>
+## Key Features
 
-<h2>Prerequisites</h2>
-<p>Before you begin, ensure you have met the following requirements:</p>
-<ul>
-    <li><strong>Android Studio</strong> (version 2021.1.1 or above)</li>
-    <li><strong>Android SDK</strong> with minimum <strong>API level 21</strong></li>
-    <li>A <strong>physical Android device</strong> with a camera (emulator won't support real-time camera features effectively)</li>
-    <li>Basic understanding of Android development, Kotlin, and machine learning concepts</li>
-</ul>
+### 🧠 On-Device Semantic Image Segmentation
+* **TensorFlow Lite Models**: Real-time pixel-level semantic segmentation using models trained on **Cityscapes** and **PASCAL VOC** datasets (`shufflenetv2`, `deeplabv3`).
+* **High-Speed Inference**: Direct output tensor evaluation on background threads with zero UI latency and optional TFLite GPU acceleration.
 
-<h2>Getting Started</h2>
-<p>Follow these instructions to set up the project and run the application on your device.</p>
+### 🧭 Spatial Directional Guidance & Zone Analysis
+* **5-Zone Corridor Scanning**: Subdivides the walking path into 5 scanning columns (*Far-Left*, *Mid-Left*, *Center*, *Mid-Right*, *Far-Right*) for precise directional guidance.
+* **Spatial Spoken Feedback**: Announces directional hazard states:
+  * *"Path clear ahead"*
+  * *"Obstacle directly ahead"*
+  * *"Obstacle on left"* / *"Obstacle on right"*
+  * *"Path blocked"*
 
-<h3>1. Clone the Repository</h3>
-<p>Clone this repository using the following command:</p>
+### 🚪 Tight Space & Doorway Alignment Cues
+* **Narrow Passage Detection**: Identifies narrow corridors, aisles, and doorways flanked by side walls or doorframes.
+* **Micro-Alignment Prompts**: Spoken and haptic instructions to center the user through tight fits:
+  * *"Narrow passage centered. Walk straight."*
+  * *"Tight space. Shift left."*
+  * *"Tight space. Shift right."*
 
-<pre><code>git clone https://github.com/your-username/object-detection-app.git
-</code></pre>
+### 📳 Tactile Haptic Vibration Feedback
+* **Multimodal Vibration Patterns**: Delivers distinct tactile cues for quiet mode or noisy outdoor environments:
+  * **Blocked / Severe Danger**: Double strong vibration pulse.
+  * **Directional Obstacles**: Single medium pulse.
+  * **Path Clear / Centered Doorway**: Gentle tick pulse.
+  * **Dark / Obscured Camera**: Triple warning tick pulse.
 
-<h3>2. Open in Android Studio</h3>
-<ol>
-    <li>Open <strong>Android Studio</strong> and select <strong>File</strong> &gt; <strong>Open</strong>.</li>
-    <li>Navigate to the project directory you just cloned.</li>
-    <li>Wait for Android Studio to sync the project and install the required dependencies.</li>
-</ol>
+### 🚗 Full-Screen Reversing Camera Trajectory Overlay
+* **Visual Guidance Corridor**: Renders automotive-style perspective trajectory lines over the live camera view:
+  * **Green Crossbar**: Far / Safe zone.
+  * **Yellow Crossbar**: Mid / Caution zone.
+  * **Red Crossbar**: Near / Stop zone.
+  * **Translucent Red Hazard Shading**: Highlights blocked walking areas in real time.
+* **Doorway Alignment Guide**: Dashed cyan overlay corridor highlighting narrow passage alignment.
 
-<h3>3. Install Dependencies</h3>
-<p>The following dependencies are used in the project:</p>
+### 🖐️ Blind Accessibility & Gestures
+* **Full-Screen Touch Gestures**:
+  * **Single Tap**: Instantly repeats current spatial status aloud on demand.
+  * **Double Tap**: Toggles between **Voice + Haptic** mode and **Silent Haptic-Only** mode.
+* **Low-Light & Lens Coverage Detection**: Continuously measures scene luminance, warning the user if the camera lens is covered or the environment is pitch black (*"Camera obscured or environment too dark"*).
 
-<pre><code>
-dependencies {
-    implementation("org.tensorflow:tensorflow-lite:2.6.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.3.1")
-    implementation("androidx.camera:camera-core:1.1.0")
-    implementation("androidx.camera:camera-camera2:1.1.0")
-    implementation("androidx.camera:camera-view:1.1.0")
-    implementation("androidx.camera:camera-lifecycle:1.1.0")
-    implementation("android.speech.tts.TextToSpeech")
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
-}
-</code></pre>
+---
 
-<h3>4. TensorFlow Lite Model</h3>
-<p>Ensure you have a TensorFlow Lite model file (<code>model.tflite</code>) in the <code>assets</code> directory. If you don't have a model, you can either train a custom model or download a pre-trained object detection model (e.g., MobileNet SSD) compatible with TensorFlow Lite.</p>
+## Technical Stack & Architecture
 
-<p>Place your model in the following directory:</p>
+* **Language**: Kotlin & Java
+* **Machine Learning**: TensorFlow Lite (`org.tensorflow:tensorflow-lite:2.12.0`)
+* **Camera API**: Android Camera2 (`android.hardware.camera2`)
+* **Audio & Speech**: Android Text-To-Speech (`android.speech.tts.TextToSpeech`)
+* **Haptics**: Android Vibrator & VibrationEffect (`android.os.Vibrator`)
+* **UI Layout**: ConstraintLayout with custom Kotlin `GuidanceOverlayView` overlay
+* **Min SDK**: API 28 (Android 9.0) | **Target SDK**: API 34 (Android 14)
 
-<pre><code>app/src/main/assets/model.tflite
-</code></pre>
+---
 
-<h3>5. Running the App</h3>
-<ol>
-    <li><strong>Connect a physical Android device</strong> and enable <strong>USB Debugging</strong>.</li>
-    <li>Click <strong>Run</strong> in Android Studio or use the command:</li>
-</ol>
+## Project Structure
 
-<pre><code>./gradlew installDebug
-</code></pre>
+```
+Camera-segmentation-app/
+├── app/
+│   ├── src/
+│   │   ├── main/
+│   │   │   ├── java/com/example/camera_segmentation_app/
+│   │   │   │   ├── MainActivity.java            # Main activity, camera lifecycle, spatial analysis & TTS
+│   │   │   │   ├── imageSegmenter.kt            # TFLite model loader, bytebuffer preprocessing & inference
+│   │   │   │   ├── GuidanceOverlayView.kt       # Custom full-screen reversing trajectory overlay
+│   │   │   │   └── Utils.kt                     # Image scaling and bitmap color mapping helpers
+│   │   │   ├── assets/                          # Pre-trained TFLite model assets (.tflite)
+│   │   │   └── res/layout/activity_main.xml     # Main layout with camera texture and overlays
+│   │   └── AndroidManifest.xml                  # Permissions (CAMERA, VIBRATE, INTERNET)
+│   └── build.gradle                             # App-level build dependencies
+└── README.md
+```
 
-<ol start="3">
-    <li>The app will launch on the device and start the camera feed.</li>
-    <li>As objects are detected, the app will provide audio feedback indicating the presence of obstacles.</li>
-</ol>
+---
 
-<h2>How It Works</h2>
-<p>The app captures live video feed using <strong>CameraX</strong>. Each frame is analyzed in real time by a <strong>TensorFlow Lite</strong> object detection model. When an obstacle is detected with confidence higher than a threshold, the app uses the device's <strong>Text-to-Speech</strong> engine to notify the user about the obstacle.</p>
+## Getting Started
 
-<h2>Project Structure</h2>
+### Prerequisites
+* Android Studio (2021.1.1 or newer)
+* Physical Android device (API 28+) with a working camera and vibrator
+* Gradle 8.0+
 
-<pre><code>
-/app
-├── src
-│   ├── main
-│   │   ├── java/com/example/navigationapp
-│   │   │   └── MainActivity.kt           # Main activity that handles CameraX and TensorFlow Lite
-│   │   ├── res                           # Resource files (layouts, icons, etc.)
-│   │   ├── assets/model.tflite           # TensorFlow Lite model
-│   │   └── AndroidManifest.xml            # Android app manifest file
-├── build.gradle.kts                      # Gradle configuration file (Kotlin DSL)
-└── README.md                             # Project readme file (this file)
-</code></pre>
+### Setup & Run
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-username/Camera-segmentation-app.git
+   ```
+2. Open the project directory in Android Studio.
+3. Sync Gradle dependencies.
+4. Connect a physical Android device with USB Debugging enabled.
+5. Click **Run** or execute:
+   ```bash
+   ./gradlew app:installDebug
+   ```
 
-<h2>License</h2>
-<p>This project is licensed under the MIT License - see the <a href="LICENSE">LICENSE</a> file for details.</p>
+---
 
-<h2>Acknowledgements</h2>
-<ul>
-    <li><a href="https://www.tensorflow.org/lite">TensorFlow Lite</a></li>
-    <li><a href="https://www.linkedin.com/in/paul-chola-bwembya-mumbi-096182285/">PAUL CHOLA BWEMBYA MUMBI</a></li>
-    <li><a href="https://developer.android.com/reference/android/speech/tts/TextToSpeech">Text-to-Speech (TTS)</a></li>
-</ul>
+## License
 
-</body>
-</html>
+This project is open source and available under the [MIT License](LICENSE).
+
+---
+
+## Acknowledgements
+* [TensorFlow Lite](https://www.tensorflow.org/lite)
+* Cityscapes & PASCAL VOC Segmentation Datasets
+* PAUL CHOLA BWEMBYA MUMBI

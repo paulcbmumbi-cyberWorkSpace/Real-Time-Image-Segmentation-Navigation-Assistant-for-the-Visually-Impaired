@@ -153,6 +153,7 @@ public class ImageSegmenter(private val activity: Activity) {
         fun segmentFrame(bitmap: Bitmap): IntArray {
         if (tflite == null) {
             Log.e(TAG, "Image segmenter has not been initialized; Skipped.")
+            return outFrame
         }
 
         convertBitmapToByteBuffer(bitmap)

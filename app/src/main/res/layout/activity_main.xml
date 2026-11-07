@@ -16,6 +16,15 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.454" />
 
+    <com.example.camera_segmentation_app.GuidanceOverlayView
+        android:id="@+id/GuidanceOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="@+id/PreviewView"
+        app:layout_constraintEnd_toEndOf="@+id/PreviewView"
+        app:layout_constraintStart_toStartOf="@+id/PreviewView"
+        app:layout_constraintTop_toTopOf="@+id/PreviewView" />
+
     <ImageView
         android:id="@+id/MiniView"
         android:layout_width="150dp"

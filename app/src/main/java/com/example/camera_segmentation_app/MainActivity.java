@@ -1,11 +1,9 @@
 package com.example.camera_segmentation_app;
 
-import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -18,15 +16,20 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.Toast;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -38,36 +41,36 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
-class OutSections {
-    int topLeftx;
-    int topLefty;
-    int topRightx;
-    int topRighty;
-    int botLeftx;
-    int botLefty;
-    int botRightx;
-    int botRighty;
-
-    public OutSections(int topLeftx, int topLefty, int topRightx, int topRighty, int botLeftx, int botLefty, int botRightx, int botRighty) {
-        this.topLeftx = topLeftx;
-        this.topLefty = topLefty;
-        this.topRightx = topRightx;
-        this.topRighty = topRighty;
-        this.botLeftx = botLeftx;
-        this.botLefty = botLefty;
-        this.botRightx = botRightx;
-        this.botRighty = botRighty;
-    }
-}
-
 public class MainActivity extends AppCompatActivity {
 
-    private Bitmap mSegmImage;
+    public static final int STATE_ALL_CLEAR = 1;
+    public static final int STATE_OBSTACLE_CENTER = 2;
+    public static final int STATE_OBSTACLE_LEFT = 3;
+    public static final int STATE_OBSTACLE_RIGHT = 4;
+    public static final int STATE_BLOCKED = 5;
+    public static final int STATE_TOO_DARK = 6;
+    public static final int STATE_NARROW_PASSAGE_CENTER = 7;
+    public static final int STATE_NARROW_PASSAGE_SHIFT_LEFT = 8;
+    public static final int STATE_NARROW_PASSAGE_SHIFT_RIGHT = 9;
+
     private TextToSpeech mTTs;
+    private ImageSegmenter mSegmenter;
+    private Vibrator mVibrator;
+    private GestureDetector mGestureDetector;
+    private GuidanceOverlayView mGuidanceOverlay;
+
+    private String mLastSpokenLine = "";
+    private int mCurrentGuidanceState = STATE_ALL_CLEAR;
+    private boolean mHapticOnlyMode = false;
 
     private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private TextureView mPreview;
     private ImageView mMiniView;
+
+    private HandlerThread mBackgroundHandlerThread;
+    private Handler mBackgroundHandler;
+    private Runnable mSegmentationRunnable;
+
     private TextureView.SurfaceTextureListener mSurfaceTextureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
@@ -76,9 +79,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
-
-        }
+        public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {}
 
         @Override
         public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
@@ -86,9 +87,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-
-        }
+        public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {}
     };
 
     private CameraDevice mCamera;
@@ -97,77 +96,24 @@ public class MainActivity extends AppCompatActivity {
         public void onOpened(@NonNull CameraDevice camera) {
             mCamera = camera;
             startPreview();
-            Toast.makeText(getApplicationContext(), "Camera connected successfully!", Toast.LENGTH_SHORT).show();
-
-            final ImageSegmenter Segmenter = new ImageSegmenter(MainActivity.this);
-
-            // Secondary thread to process the segmentation without blocking up the main.
-            final Handler mHandler = new Handler(getMainLooper());
-            mHandler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    // Gets the preview image and places it in a bitmap object called
-                    Bitmap fullimg = mPreview.getBitmap();
-                    Bitmap img = Bitmap.createScaledBitmap(fullimg, 225, 225, true);
-
-                    // Segmenter.segmentFrame(img)
-                    // This is where the function to carry out the segmentation goes
-                    int[] outputArray = Segmenter.segmentFrame(img);
-
-                    Log.d("OUT", Arrays.toString(outputArray));
-
-                    int width = 225;
-                    int height = 225;
-
-                    Bitmap outputBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-
-                    ImageSegmenter.Model model= Segmenter.getCurrentModel();
-                    Utils.Companion.segmentResultToBitmap(outputArray, model.getColors(), outputBitmap);
-                    mMiniView= findViewById(R.id.MiniView);
-                    mMiniView.setImageBitmap(Utils.Companion.resizeBitmap(outputBitmap, width, height));
-
-                    // This would take the output of the segmentation, then convert it to audio
-                    voiceOutput(segmentToVoice(outputBitmap));
-
-                    mHandler.postDelayed(this, 1000);
-                }
-            }, 1000);
-
+            runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Camera connected successfully!", Toast.LENGTH_SHORT).show());
+            startSegmentationLoop();
         }
 
         @Override
         public void onDisconnected(@NonNull CameraDevice camera) {
+            stopSegmentationLoop();
             camera.close();
             mCamera = null;
         }
 
         @Override
         public void onError(@NonNull CameraDevice camera, int i) {
+            stopSegmentationLoop();
             camera.close();
             mCamera = null;
         }
     };
-
-    private HandlerThread mBackgroundHandlerThread;
-    private Handler mBackgroundHandler;
-
-    private void startBackgroundThread() {
-        mBackgroundHandlerThread = new HandlerThread("Camera");
-        mBackgroundHandlerThread.start();
-        mBackgroundHandler = new Handler(mBackgroundHandlerThread.getLooper());
-    }
-
-    private void stopBackgroundThread() {
-        mBackgroundHandlerThread.quitSafely();
-        try {
-            mBackgroundHandlerThread.join();
-            mBackgroundHandlerThread = null;
-            mBackgroundHandler = null;
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-    }
 
     private String mCameraID;
     private static SparseIntArray ORIENTATIONS = new SparseIntArray();
@@ -183,14 +129,12 @@ public class MainActivity extends AppCompatActivity {
     private CaptureRequest.Builder mCaptureRequestBuilder;
 
     private static class CompareSizeByArea implements Comparator<Size> {
-
         @Override
         public int compare(Size lhs, Size rhs) {
             return Long.signum((long) (lhs.getWidth() * lhs.getHeight()) -
                     (long) (rhs.getWidth() * rhs.getHeight()));
         }
     }
-
 
     private static int sensorToDeviceRotation(CameraCharacteristics cameraCharacteristics, int deviceOrientation) {
         int sensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
@@ -199,31 +143,60 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onCreate (Bundle savedInstanceState)  {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        mPreview = (TextureView) findViewById(R.id.PreviewView);
+        mPreview = findViewById(R.id.PreviewView);
+        mMiniView = findViewById(R.id.MiniView);
+        mGuidanceOverlay = findViewById(R.id.GuidanceOverlay);
 
-        mTTs= new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
-            @Override
-            public void onInit(int i) {
-                if(i!= TextToSpeech.ERROR){
-                    mTTs.setLanguage(Locale.US);
+        // Initialize ImageSegmenter & Vibrator
+        mSegmenter = new ImageSegmenter(this);
+        mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
-                }
-                else{
-                    Toast.makeText(MainActivity.this,"ERROR",Toast.LENGTH_SHORT).show();
-                }
+        mTTs = new TextToSpeech(getApplicationContext(), i -> {
+            if (i != TextToSpeech.ERROR) {
+                mTTs.setLanguage(Locale.US);
+            } else {
+                Toast.makeText(MainActivity.this, "TTS Initialization Error", Toast.LENGTH_SHORT).show();
             }
         });
 
+        setupTouchGestures();
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private void setupTouchGestures() {
+        mGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                speakStatusImmediate(mCurrentGuidanceState);
+                return true;
+            }
+
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                mHapticOnlyMode = !mHapticOnlyMode;
+                String msg = mHapticOnlyMode ? "Vibration only mode activated." : "Voice guidance mode activated.";
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                if (mTTs != null) {
+                    mTTs.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "MODE_TOGGLE");
+                }
+                triggerHapticFeedback(STATE_ALL_CLEAR);
+                return true;
+            }
+        });
+
+        View rootView = findViewById(android.R.id.content);
+        if (rootView != null) {
+            rootView.setOnTouchListener((v, event) -> mGestureDetector.onTouchEvent(event));
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
         startBackgroundThread();
 
         if (mPreview.isAvailable()) {
@@ -234,18 +207,341 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
+    @Override
     protected void onPause() {
+        stopSegmentationLoop();
         closeCamera();
         stopBackgroundThread();
         super.onPause();
     }
 
     @Override
+    protected void onDestroy() {
+        stopSegmentationLoop();
+        if (mSegmenter != null) {
+            mSegmenter.close();
+            mSegmenter = null;
+        }
+        if (mTTs != null) {
+            mTTs.stop();
+            mTTs.shutdown();
+            mTTs = null;
+        }
+        super.onDestroy();
+    }
+
+    private void startBackgroundThread() {
+        mBackgroundHandlerThread = new HandlerThread("CameraBackground");
+        mBackgroundHandlerThread.start();
+        mBackgroundHandler = new Handler(mBackgroundHandlerThread.getLooper());
+    }
+
+    private void stopBackgroundThread() {
+        if (mBackgroundHandlerThread != null) {
+            mBackgroundHandlerThread.quitSafely();
+            try {
+                mBackgroundHandlerThread.join();
+                mBackgroundHandlerThread = null;
+                mBackgroundHandler = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void startSegmentationLoop() {
+        stopSegmentationLoop();
+        mSegmentationRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (mCamera == null || mPreview == null || !mPreview.isAvailable() || mSegmenter == null) {
+                    return;
+                }
+
+                // Get scaled camera frame on UI thread to ensure thread safety with TextureView
+                runOnUiThread(() -> {
+                    if (mPreview != null && mPreview.isAvailable()) {
+                        Bitmap scaledInput = mPreview.getBitmap(225, 225);
+                        if (scaledInput != null && mBackgroundHandler != null) {
+                            mBackgroundHandler.post(() -> processSegmentationFrame(scaledInput));
+                        }
+                    }
+                });
+
+                // Schedule next capture iteration
+                if (mBackgroundHandler != null) {
+                    mBackgroundHandler.postDelayed(this, 1000);
+                }
+            }
+        };
+
+        if (mBackgroundHandler != null) {
+            mBackgroundHandler.postDelayed(mSegmentationRunnable, 1000);
+        }
+    }
+
+    private void stopSegmentationLoop() {
+        if (mBackgroundHandler != null && mSegmentationRunnable != null) {
+            mBackgroundHandler.removeCallbacks(mSegmentationRunnable);
+        }
+    }
+
+    private void processSegmentationFrame(Bitmap img) {
+        if (mSegmenter == null || isFinishing() || isDestroyed()) {
+            img.recycle();
+            return;
+        }
+
+        int width = img.getWidth();
+        int height = img.getHeight();
+
+        // 1. Calculate average luminance to detect low light / camera occlusion
+        int avgLuminance = calculateAverageLuminance(img);
+
+        // 2. Perform TFLite Inference directly on Camera Frame (Background Thread)
+        int[] outputArray = mSegmenter.segmentFrame(img);
+        img.recycle();
+
+        // 3. Directly Analyze Raw Segmentation Output Tensor Array (No Bitmap Color Scanning)
+        final int guidanceState = analyzeEnvironment(outputArray, width, height, avgLuminance);
+
+        // 4. Render segmentation mask preview
+        Bitmap outputBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        ImageSegmenter.Model model = mSegmenter.getCurrentModel();
+        Utils.Companion.segmentResultToBitmap(outputArray, model.getColors(), outputBitmap);
+        Bitmap resizedOutput = Utils.Companion.resizeBitmap(outputBitmap, width, height);
+
+        // 5. Update Full-Screen Camera Guidance Overlay, Inset View, Haptic & Voice feedback on Main Thread
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) {
+                if (mGuidanceOverlay != null) {
+                    mGuidanceOverlay.setGuidanceState(guidanceState);
+                }
+                if (mMiniView != null) {
+                    mMiniView.setImageBitmap(resizedOutput);
+                }
+                voiceOutput(guidanceState);
+            }
+        });
+    }
+
+    private int calculateAverageLuminance(Bitmap bitmap) {
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        int[] pixels = new int[w * h];
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+        long sumLuminance = 0;
+        int sampledCount = 0;
+        for (int i = 0; i < pixels.length; i += 4) { // sample every 4th pixel for high speed
+            int color = pixels[i];
+            int r = (color >> 16) & 0xFF;
+            int g = (color >> 8) & 0xFF;
+            int b = color & 0xFF;
+            sumLuminance += (long) (0.299 * r + 0.587 * g + 0.114 * b);
+            sampledCount++;
+        }
+        return sampledCount > 0 ? (int) (sumLuminance / sampledCount) : 128;
+    }
+
+    public int analyzeEnvironment(int[] outputArray, int width, int height, int avgLuminance) {
+        if (avgLuminance < 15) {
+            return STATE_TOO_DARK;
+        }
+
+        int col1Count = 0; // Far-Left (0..20%)
+        int col2Count = 0; // Mid-Left (20..40%)
+        int col3Count = 0; // Center (40..60%)
+        int col4Count = 0; // Mid-Right (60..80%)
+        int col5Count = 0; // Far-Right (80..100%)
+        int sampledPerCol = 0;
+
+        // Sample lower half of 225x225 grid
+        for (int y = height / 2; y < height; y += 4) {
+            for (int x = 0; x < width; x += 4) {
+                int index = y * width + x;
+                if (index < 0 || index >= outputArray.length) continue;
+                int classIndex = outputArray[index];
+
+                boolean isFloor = (classIndex == 0 || classIndex == 1);
+
+                float xRatio = (float) x / width;
+                if (xRatio < 0.20f) {
+                    if (isFloor) col1Count++;
+                    sampledPerCol++;
+                } else if (xRatio < 0.40f) {
+                    if (isFloor) col2Count++;
+                } else if (xRatio < 0.60f) {
+                    if (isFloor) col3Count++;
+                } else if (xRatio < 0.80f) {
+                    if (isFloor) col4Count++;
+                } else {
+                    if (isFloor) col5Count++;
+                }
+            }
+        }
+
+        double threshold = sampledPerCol * 0.35; // At least 35% of column is floor
+        boolean c1 = col1Count >= threshold;
+        boolean c2 = col2Count >= threshold;
+        boolean c3 = col3Count >= threshold;
+        boolean c4 = col4Count >= threshold;
+        boolean c5 = col5Count >= threshold;
+
+        // All 5 clear
+        if (c1 && c2 && c3 && c4 && c5) {
+            return STATE_ALL_CLEAR;
+        }
+        // All 5 blocked
+        if (!c1 && !c2 && !c3 && !c4 && !c5) {
+            return STATE_BLOCKED;
+        }
+
+        // Detect Narrow Passage / Doorway (Sides blocked, middle clear)
+        boolean sidesBlocked = (!c1 || !c5);
+        if (sidesBlocked && c3) {
+            if (c2 && c4) {
+                return STATE_NARROW_PASSAGE_CENTER; // Centered doorway
+            } else if (c2) {
+                return STATE_NARROW_PASSAGE_SHIFT_LEFT; // Doorway clearer on left
+            } else if (c4) {
+                return STATE_NARROW_PASSAGE_SHIFT_RIGHT; // Doorway clearer on right
+            } else {
+                return STATE_NARROW_PASSAGE_CENTER;
+            }
+        }
+
+        if (!c3) {
+            return STATE_OBSTACLE_CENTER;
+        }
+        if (!c1 || !c2) {
+            return STATE_OBSTACLE_LEFT;
+        }
+        return STATE_OBSTACLE_RIGHT;
+    }
+
+    private String getGuidanceText(int state) {
+        switch (state) {
+            case STATE_ALL_CLEAR:
+                return "Path clear ahead.";
+            case STATE_OBSTACLE_CENTER:
+                return "Obstacle directly ahead.";
+            case STATE_OBSTACLE_LEFT:
+                return "Obstacle on left.";
+            case STATE_OBSTACLE_RIGHT:
+                return "Obstacle on right.";
+            case STATE_BLOCKED:
+                return "Path blocked.";
+            case STATE_TOO_DARK:
+                return "Camera obscured or environment too dark.";
+            case STATE_NARROW_PASSAGE_CENTER:
+                return "Narrow passage centered. Walk straight.";
+            case STATE_NARROW_PASSAGE_SHIFT_LEFT:
+                return "Tight space. Shift left.";
+            case STATE_NARROW_PASSAGE_SHIFT_RIGHT:
+                return "Tight space. Shift right.";
+            default:
+                return "";
+        }
+    }
+
+    private void voiceOutput(int state) {
+        mCurrentGuidanceState = state;
+        triggerHapticFeedback(state);
+
+        if (mHapticOnlyMode) {
+            return; // In haptic-only mode, skip periodic voice output
+        }
+
+        String lineToSpeak = getGuidanceText(state);
+        if (lineToSpeak.isEmpty()) return;
+
+        // Speak if state changed or TTS is not currently speaking
+        if (mTTs != null && (!lineToSpeak.equals(mLastSpokenLine) || !mTTs.isSpeaking())) {
+            mLastSpokenLine = lineToSpeak;
+            Toast.makeText(MainActivity.this, lineToSpeak, Toast.LENGTH_SHORT).show();
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                mTTs.speak(lineToSpeak, TextToSpeech.QUEUE_FLUSH, null, "GUIDANCE");
+            } else {
+                mTTs.speak(lineToSpeak, TextToSpeech.QUEUE_FLUSH, null);
+            }
+        }
+    }
+
+    private void speakStatusImmediate(int state) {
+        String lineToSpeak = getGuidanceText(state);
+        if (lineToSpeak.isEmpty()) return;
+        Toast.makeText(MainActivity.this, lineToSpeak, Toast.LENGTH_SHORT).show();
+        if (mTTs != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                mTTs.speak(lineToSpeak, TextToSpeech.QUEUE_FLUSH, null, "IMMEDIATE");
+            } else {
+                mTTs.speak(lineToSpeak, TextToSpeech.QUEUE_FLUSH, null);
+            }
+        }
+    }
+
+    private void triggerHapticFeedback(int guidanceState) {
+        if (mVibrator == null || !mVibrator.hasVibrator()) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                switch (guidanceState) {
+                    case STATE_BLOCKED:
+                        // Double vibration pulse for blocked path
+                        long[] timings = {0, 150, 100, 150};
+                        int[] amplitudes = {0, 255, 0, 255};
+                        mVibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1));
+                        break;
+                    case STATE_OBSTACLE_CENTER:
+                    case STATE_OBSTACLE_LEFT:
+                    case STATE_OBSTACLE_RIGHT:
+                        // Single medium pulse for directional obstacle
+                        mVibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE));
+                        break;
+                    case STATE_TOO_DARK:
+                        // Three short warning ticks
+                        mVibrator.vibrate(VibrationEffect.createWaveform(new long[]{0, 50, 50, 50, 50, 50}, -1));
+                        break;
+                    case STATE_NARROW_PASSAGE_CENTER:
+                        // Gentle tick for centered narrow passage
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            mVibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.EFFECT_TICK));
+                        } else {
+                            mVibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE));
+                        }
+                        break;
+                    case STATE_NARROW_PASSAGE_SHIFT_LEFT:
+                    case STATE_NARROW_PASSAGE_SHIFT_RIGHT:
+                        // Short double tick to prompt shift
+                        long[] shiftTimings = {0, 40, 60, 40};
+                        mVibrator.vibrate(VibrationEffect.createWaveform(shiftTimings, -1));
+                        break;
+                    case STATE_ALL_CLEAR:
+                        // Subtle tick for clear path
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            mVibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.EFFECT_TICK));
+                        } else {
+                            mVibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE));
+                        }
+                        break;
+                }
+            } else {
+                if (guidanceState == STATE_BLOCKED) {
+                    mVibrator.vibrate(300);
+                } else if (guidanceState != STATE_ALL_CLEAR) {
+                    mVibrator.vibrate(100);
+                }
+            }
+        } catch (Exception e) {
+            Log.e("HAPTIC", "Vibration error", e);
+        }
+    }
+
+    @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if(requestCode == REQUEST_CAMERA_PERMISSION_RESULT) {
-            if(grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == REQUEST_CAMERA_PERMISSION_RESULT) {
+            if (grantResults.length > 0 && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(getApplicationContext(), "Application won't run without Permissions.", Toast.LENGTH_SHORT).show();
             }
         }
@@ -263,7 +559,6 @@ public class MainActivity extends AppCompatActivity {
                             | View.SYSTEM_UI_FLAG_FULLSCREEN
             );
         }
-
     }
 
     private void setupCamera(int width, int height) {
@@ -287,40 +582,36 @@ public class MainActivity extends AppCompatActivity {
                 mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), rotatedWidth, rotatedHeight);
                 mCameraID = cameraID;
                 return;
-
             }
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
-
     @SuppressLint("MissingPermission")
     private void connectCamera() {
         CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         try {
-            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if(ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) ==
-                        PackageManager.PERMISSION_GRANTED) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                     cameraManager.openCamera(mCameraID, mCameraDeviceStateCallback, mBackgroundHandler);
                 } else {
-                    if(shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA)) {
-                        Toast.makeText(this,
-                                "Video app required access to camera", Toast.LENGTH_SHORT).show();
+                    if (shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA)) {
+                        Toast.makeText(this, "Video app required access to camera", Toast.LENGTH_SHORT).show();
                     }
-                    requestPermissions(new String[] {android.Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
-                    }, REQUEST_CAMERA_PERMISSION_RESULT);
+                    requestPermissions(new String[]{android.Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION_RESULT);
                 }
-
             } else {
                 cameraManager.openCamera(mCameraID, mCameraDeviceStateCallback, mBackgroundHandler);
-            }        } catch (CameraAccessException e) {
+            }
+        } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
     private void startPreview() {
         SurfaceTexture surfaceTexture = mPreview.getSurfaceTexture();
+        if (surfaceTexture == null || mPreviewSize == null) return;
         surfaceTexture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
         Surface previewSurface = new Surface(surfaceTexture);
 
@@ -338,6 +629,7 @@ public class MainActivity extends AppCompatActivity {
                                 e.printStackTrace();
                             }
                         }
+
                         @Override
                         public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
                             Toast.makeText(getApplicationContext(), "Unable to setup Preview", Toast.LENGTH_SHORT).show();
@@ -349,189 +641,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void closeCamera() {
-        if(mCamera != null) {
+        if (mCamera != null) {
             mCamera.close();
+            mCamera = null;
         }
     }
 
     private static Size chooseOptimalSize(Size[] choices, int width, int height) {
-
-        List<Size> bigEnough = new ArrayList<Size>();
-        for(Size option : choices) {
-            if(option.getHeight() == option.getWidth() * height / width &&
+        List<Size> bigEnough = new ArrayList<>();
+        for (Size option : choices) {
+            if (option.getHeight() == option.getWidth() * height / width &&
                     option.getWidth() >= width && option.getHeight() >= height) {
                 bigEnough.add(option);
             }
         }
-        if(bigEnough.size() > 0) {
+        if (bigEnough.size() > 0) {
             return Collections.min(bigEnough, new CompareSizeByArea());
         } else {
             return choices[0];
         }
     }
-
-    public int segmentToVoice(Bitmap segmOut) {
-
-        int point_count = 0;
-        int w = segmOut.getWidth();
-        int h = segmOut.getHeight();
-        int[] pxs = new int[w*h];
-        String img_width = Integer.toString(w);
-        String img_height = Integer.toString(h);
-
-        segmOut.getPixels(pxs, 0, w, 0, 0, w, h);
-
-        Log.d("IMG", Arrays.toString(pxs));
-
-        // Color pixelColor = segmOut.getColor(w/2, h/2);
-
-        int pixelColor = segmOut.getPixel(w/2, h/2);
-
-        Toast.makeText(getApplicationContext(), "Width=" + img_width + "Height=" + img_height, Toast.LENGTH_SHORT).show();
-        // colour for floor = (128, 64, 128)
-
-        // |      S1      |
-        // | S2 | S3 | S4 |
-        // | S5 | S6 | S7 |
-
-        int topleftx = 150;
-        int toplefty = 75;
-
-//                                         224, 75, 224, 149
-
-//        OutSections S1 = new OutSections(0, 0, 0, 224,
-//                                         74, 0, 74, 224);
-//
-//        OutSections S2 = new OutSections(75, 0, 75, 74,
-//                                         149, 0, 149, 75);
-//
-//        OutSections S3 = new OutSections(75, 75, 75, 149,
-//                                         149, 75, 149, 149);
-//
-//        OutSections S4 = new OutSections(75, 150, 75, 224,
-//                                         149, 150, 149, 224);
-//
-//        OutSections S5 = new OutSections(150, 0, 150, 74,
-//                                         224, 0, 224, 74);
-//
-        OutSections S6 = new OutSections(150, 75, 150, 149,
-                                         224, 75, 224, 149);
-//
-//        OutSections S7 = new OutSections(150, 150, 150, 224,
-//                                         224, 150, 224, 224);
-
-        int pixelColor_1 = segmOut.getPixel(S6.topLeftx+25, S6.topLefty+25);
-        // int pixelColor_2 = segmOut.getPixel(S6.topLeftx+50, S6.topLefty+25);
-        // int pixelColor_3 = segmOut.getPixel(S6.topLeftx+25, S6.topLefty+50);
-        // int pixelColor_4 = segmOut.getPixel(S6.topLeftx+50, S6.topLefty+50);
-
-        // 1 2
-        // 3 4
-
-//        int red_1 = Color.red(pixelColor_1);
-//        int green_1 = Color.green(pixelColor_1);
-//        int blue_1 = Color.blue(pixelColor_1);
-//        int red_2 = Color.red(pixelColor_2);
-//        int green_2 = Color.green(pixelColor_2);
-//        int blue_2 = Color.blue(pixelColor_2);
-//        int red_3 = Color.red(pixelColor_3);
-//        int green_3 = Color.green(pixelColor_3);
-//        int blue_3 = Color.blue(pixelColor_3);
-//        int red_4 = Color.red(pixelColor_4);
-//        int green_4 = Color.green(pixelColor_4);
-//        int blue_4 = Color.blue(pixelColor_4);
-        String r_1, g_1, b_1, r_2, g_2, b_2;
-
-//        r_1 = Integer.toString(red_1);
-//        g_1 = Integer.toString(green_1);
-//        b_1 = Integer.toString(blue_1);
-//        r_2 = Integer.toString(red_2);
-//        g_2 = Integer.toString(green_2);
-//        b_2 = Integer.toString(blue_2);
-//        r_3 = Integer.toString(red_3);
-//        g_3 = Integer.toString(green_3);
-//        b_3 = Integer.toString(blue_3);
-//        r_4 = Integer.toString(red_4);
-//        g_4 = Integer.toString(green_4);
-//        b_4 = Integer.toString(blue_4);
-
-//        Toast.makeText(getApplicationContext(), r_1 + " " + g_1 + " " + b_1, Toast.LENGTH_SHORT).show();
-
-//        if(red_1 == 128 && green_1 == 64 && blue_1 == 128) {
-//             point_count++;
-//        }
-//        if(red_2 == 128 && green_2 == 64 && blue_2 == 128) {
-//            point_count++;
-//        }
-//        if(red_3 == 128 && green_3 == 64 && blue_3 == 128) {
-//            point_count++;
-//        }
-//        if(red_4 == 128 && green_4 == 64 && blue_4 == 128) {
-//            point_count++;
-//        }
-
-        int pixelColor1 = segmOut.getPixel(100, 150);
-        int pixelColor2 = segmOut.getPixel(125, 150);
-
-        int red_1 = Color.red(pixelColor1);
-        int green_1 = Color.green(pixelColor1);
-        int blue_1 = Color.blue(pixelColor1);
-        int red_2 = Color.red(pixelColor2);
-        int green_2 = Color.green(pixelColor2);
-        int blue_2 = Color.blue(pixelColor2);
-        r_1 = Integer.toString(red_1);
-        g_1 = Integer.toString(green_1);
-        b_1 = Integer.toString(blue_1);
-        r_2 = Integer.toString(red_2);
-        g_2 = Integer.toString(green_2);
-        b_2 = Integer.toString(blue_2);
-
-        Toast.makeText(getApplicationContext(), r_1 + " " + g_1 + " " + b_1 + " | " + r_2 + " " + g_2 + " " + b_2, Toast.LENGTH_SHORT).show();
-
-        if(red_1 == 128 && green_1 == 64 && blue_1 == 128) {
-             point_count++;
-        }
-        if(red_2 == 128 && green_2 == 64 && blue_2 == 128) {
-             point_count++;
-        }
-
-        Log.d("OUT", Integer.toString(point_count));
-
-        if(point_count > 0) {
-            return 1;
-        } else {
-            return 2;
-        }
-    }
-
-    private void voiceOutput(int voiceLine) {
-        String lineToSpeak;
-        switch(voiceLine) {
-            case 1:
-                lineToSpeak = "Clear.";
-                break;
-            case 2:
-                lineToSpeak = "Clutter in front.";
-                break;
-            default:
-                throw new IllegalStateException("Unexpected value: " + "");
-        }
-
-        Toast.makeText(MainActivity.this,lineToSpeak,Toast.LENGTH_LONG).show();
-
-        //speak
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mTTs.speak(lineToSpeak,TextToSpeech.QUEUE_FLUSH,null,null);
-        } else {
-            mTTs.speak(lineToSpeak, TextToSpeech.QUEUE_FLUSH, null);
-        }
-
-    }
-
-    private void updateSegmPreview(Bitmap segmOutput) {
-        Toast.makeText(MainActivity.this, "Updating Preview",Toast.LENGTH_LONG).show();
-        mMiniView= findViewById(R.id.MiniView);
-        mMiniView.setImageBitmap(segmOutput);
-    }
-
 }
