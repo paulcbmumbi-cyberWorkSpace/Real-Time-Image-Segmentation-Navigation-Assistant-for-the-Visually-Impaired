@@ -32,7 +32,7 @@
   * **Path Clear / Centered Doorway**: Gentle tick pulse.
   * **Dark / Obscured Camera**: Triple warning tick pulse.
 
-### 🚗 Full-Screen Reversing Camera Trajectory Overlay
+### Full-Screen Reversing Camera Trajectory Overlay
 * **Visual Guidance Corridor**: Renders automotive-style perspective trajectory lines over the live camera view:
   * **Green Crossbar**: Far / Safe zone.
   * **Yellow Crossbar**: Mid / Caution zone.
