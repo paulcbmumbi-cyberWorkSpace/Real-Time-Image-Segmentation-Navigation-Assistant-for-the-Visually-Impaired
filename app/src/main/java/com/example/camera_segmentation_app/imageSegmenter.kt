@@ -124,12 +124,12 @@ public class ImageSegmenter(private val activity: Activity) {
         imgData.rewind()
         bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
-        // Convert image to normalized float range [0.0f..1.0f] for accurate neural network prediction
+        // Normalize image to [-1.0f .. 1.0f] float range (standard DeepLabV3 / ShuffleNet TFLite input)
         for (pixel in 0 until intValues.size) {
             val value = intValues[pixel]
-            val r = ((value shr 16 and 0xff).toFloat() / 255.0f)
-            val g = ((value shr 8 and 0xff).toFloat() / 255.0f)
-            val b = ((value and 0xff).toFloat() / 255.0f)
+            val r = ((value shr 16 and 0xff) - 127.5f) / 127.5f
+            val g = ((value shr 8 and 0xff) - 127.5f) / 127.5f
+            val b = ((value and 0xff) - 127.5f) / 127.5f
 
             imgData.putFloat(r)
             imgData.putFloat(g)

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -63,6 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private String mLastSpokenLine = "";
     private int mCurrentGuidanceState = STATE_ALL_CLEAR;
     private boolean mHapticOnlyMode = false;
+    private int mSensorRotation = 90; // Default portrait camera sensor rotation angle
 
     private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private TextureView mPreview;
@@ -263,12 +265,12 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Get scaled camera frame on UI thread to ensure thread safety with TextureView
+                // Get camera frame on UI thread to ensure thread safety with TextureView
                 runOnUiThread(() -> {
                     if (mPreview != null && mPreview.isAvailable()) {
-                        Bitmap scaledInput = mPreview.getBitmap(225, 225);
-                        if (scaledInput != null && mBackgroundHandler != null) {
-                            mBackgroundHandler.post(() -> processSegmentationFrame(scaledInput));
+                        Bitmap rawInput = mPreview.getBitmap(225, 225);
+                        if (rawInput != null && mBackgroundHandler != null) {
+                            mBackgroundHandler.post(() -> processSegmentationFrame(rawInput));
                         }
                     }
                 });
@@ -291,11 +293,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void processSegmentationFrame(Bitmap img) {
+    private Bitmap rotateBitmap(Bitmap source, float angle) {
+        if (angle == 0) return source;
+        Matrix matrix = new Matrix();
+        matrix.postRotate(angle);
+        Bitmap rotated = Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
+        source.recycle();
+        return rotated;
+    }
+
+    private void processSegmentationFrame(Bitmap rawImg) {
         if (mSegmenter == null || isFinishing() || isDestroyed()) {
-            img.recycle();
+            rawImg.recycle();
             return;
         }
+
+        // Rotate bitmap by camera sensor orientation angle to make frame upright for neural network
+        Bitmap img = rotateBitmap(rawImg, mSensorRotation);
 
         int width = img.getWidth();
         int height = img.getHeight();
@@ -364,7 +378,7 @@ public class MainActivity extends AppCompatActivity {
         int col5Count = 0; // Far-Right (80..100%)
         int sampledPerCol = 0;
 
-        // Sample lower half of 225x225 grid
+        // Sample lower half of 225x225 grid (y: height/2 to height)
         for (int y = height / 2; y < height; y += 4) {
             for (int x = 0; x < width; x += 4) {
                 int index = y * width + x;
@@ -396,7 +410,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        double threshold = sampledPerCol * 0.30;
+        double threshold = sampledPerCol * 0.45; // At least 45% of column must be clear floor
         boolean c1 = col1Count >= threshold;
         boolean c2 = col2Count >= threshold;
         boolean c3 = col3Count >= threshold;
@@ -410,26 +424,28 @@ public class MainActivity extends AppCompatActivity {
             return STATE_BLOCKED;
         }
 
-        // Detect Narrow Passage / Doorway (Sides blocked, middle clear)
-        if ((!c1 || !c5) && c3) {
+        if (!c3) {
+            return STATE_OBSTACLE_CENTER;
+        }
+
+        // Side narrow passage / doorway check
+        if (!c1 || !c5) {
             if (c2 && c4) {
                 return STATE_NARROW_PASSAGE_CENTER;
             } else if (c2) {
                 return STATE_NARROW_PASSAGE_SHIFT_LEFT;
             } else if (c4) {
                 return STATE_NARROW_PASSAGE_SHIFT_RIGHT;
-            } else {
-                return STATE_NARROW_PASSAGE_CENTER;
             }
         }
 
-        if (!c3) {
-            return STATE_OBSTACLE_CENTER;
-        }
-        if (!c1 || !c2) {
+        if (!c2) {
             return STATE_OBSTACLE_LEFT;
+        } else if (!c4) {
+            return STATE_OBSTACLE_RIGHT;
         }
-        return STATE_OBSTACLE_RIGHT;
+
+        return STATE_ALL_CLEAR;
     }
 
     private String getGuidanceText(int state) {
@@ -584,8 +600,8 @@ public class MainActivity extends AppCompatActivity {
                 }
                 StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 int deviceOrientation = getWindowManager().getDefaultDisplay().getRotation();
-                int totalRotation = sensorToDeviceRotation(cameraCharacteristics, deviceOrientation);
-                boolean swapRotation = totalRotation == 90 || totalRotation == 270;
+                mSensorRotation = sensorToDeviceRotation(cameraCharacteristics, deviceOrientation);
+                boolean swapRotation = mSensorRotation == 90 || mSensorRotation == 270;
                 int rotatedWidth = width;
                 int rotatedHeight = height;
                 if (swapRotation) {
