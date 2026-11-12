@@ -58,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private Vibrator mVibrator;
     private GestureDetector mGestureDetector;
     private GuidanceOverlayView mGuidanceOverlay;
+    private Bitmap mReusableOutputBitmap;
 
     private String mLastSpokenLine = "";
     private int mCurrentGuidanceState = STATE_ALL_CLEAR;
@@ -218,6 +219,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         stopSegmentationLoop();
+        if (mReusableOutputBitmap != null && !mReusableOutputBitmap.isRecycled()) {
+            mReusableOutputBitmap.recycle();
+            mReusableOutputBitmap = null;
+        }
         if (mSegmenter != null) {
             mSegmenter.close();
             mSegmenter = null;
@@ -268,15 +273,15 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                // Schedule next capture iteration
+                // Schedule next capture iteration (250ms = 4 FPS for real-time responsiveness)
                 if (mBackgroundHandler != null) {
-                    mBackgroundHandler.postDelayed(this, 1000);
+                    mBackgroundHandler.postDelayed(this, 250);
                 }
             }
         };
 
         if (mBackgroundHandler != null) {
-            mBackgroundHandler.postDelayed(mSegmentationRunnable, 1000);
+            mBackgroundHandler.postDelayed(mSegmentationRunnable, 250);
         }
     }
 
@@ -302,14 +307,15 @@ public class MainActivity extends AppCompatActivity {
         int[] outputArray = mSegmenter.segmentFrame(img);
         img.recycle();
 
-        // 3. Directly Analyze Raw Segmentation Output Tensor Array (No Bitmap Color Scanning)
+        // 3. Directly Analyze Raw Segmentation Output Tensor Array (Dataset-aware)
         final int guidanceState = analyzeEnvironment(outputArray, width, height, avgLuminance);
 
-        // 4. Render segmentation mask preview
-        Bitmap outputBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        // 4. Render segmentation mask preview with bitmap reuse
+        if (mReusableOutputBitmap == null || mReusableOutputBitmap.getWidth() != width || mReusableOutputBitmap.getHeight() != height) {
+            mReusableOutputBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        }
         ImageSegmenter.Model model = mSegmenter.getCurrentModel();
-        Utils.Companion.segmentResultToBitmap(outputArray, model.getColors(), outputBitmap);
-        Bitmap resizedOutput = Utils.Companion.resizeBitmap(outputBitmap, width, height);
+        Utils.Companion.segmentResultToBitmap(outputArray, model.getColors(), mReusableOutputBitmap);
 
         // 5. Update Full-Screen Camera Guidance Overlay, Inset View, Haptic & Voice feedback on Main Thread
         runOnUiThread(() -> {
@@ -317,8 +323,8 @@ public class MainActivity extends AppCompatActivity {
                 if (mGuidanceOverlay != null) {
                     mGuidanceOverlay.setGuidanceState(guidanceState);
                 }
-                if (mMiniView != null) {
-                    mMiniView.setImageBitmap(resizedOutput);
+                if (mMiniView != null && mReusableOutputBitmap != null) {
+                    mMiniView.setImageBitmap(mReusableOutputBitmap);
                 }
                 voiceOutput(guidanceState);
             }
@@ -348,6 +354,9 @@ public class MainActivity extends AppCompatActivity {
             return STATE_TOO_DARK;
         }
 
+        ImageSegmenter.Model model = mSegmenter != null ? mSegmenter.getCurrentModel() : null;
+        ImageSegmenter.Model.Dataset dataset = model != null ? model.getColorSchema() : ImageSegmenter.Model.Dataset.CITYSCAPES;
+
         int col1Count = 0; // Far-Left (0..20%)
         int col2Count = 0; // Mid-Left (20..40%)
         int col3Count = 0; // Center (40..60%)
@@ -362,7 +371,14 @@ public class MainActivity extends AppCompatActivity {
                 if (index < 0 || index >= outputArray.length) continue;
                 int classIndex = outputArray[index];
 
-                boolean isFloor = (classIndex == 0 || classIndex == 1);
+                boolean isFloor;
+                if (dataset == ImageSegmenter.Model.Dataset.PASCAL) {
+                    // PASCAL VOC: Class 0 = Background/Ground
+                    isFloor = (classIndex == 0);
+                } else {
+                    // CITYSCAPES: Class 0 = Road, Class 1 = Sidewalk, Class 9 = Vegetation/Grass
+                    isFloor = (classIndex == 0 || classIndex == 1 || classIndex == 9);
+                }
 
                 float xRatio = (float) x / width;
                 if (xRatio < 0.20f) {
@@ -380,31 +396,28 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        double threshold = sampledPerCol * 0.35; // At least 35% of column is floor
+        double threshold = sampledPerCol * 0.30;
         boolean c1 = col1Count >= threshold;
         boolean c2 = col2Count >= threshold;
         boolean c3 = col3Count >= threshold;
         boolean c4 = col4Count >= threshold;
         boolean c5 = col5Count >= threshold;
 
-        // All 5 clear
         if (c1 && c2 && c3 && c4 && c5) {
             return STATE_ALL_CLEAR;
         }
-        // All 5 blocked
         if (!c1 && !c2 && !c3 && !c4 && !c5) {
             return STATE_BLOCKED;
         }
 
         // Detect Narrow Passage / Doorway (Sides blocked, middle clear)
-        boolean sidesBlocked = (!c1 || !c5);
-        if (sidesBlocked && c3) {
+        if ((!c1 || !c5) && c3) {
             if (c2 && c4) {
-                return STATE_NARROW_PASSAGE_CENTER; // Centered doorway
+                return STATE_NARROW_PASSAGE_CENTER;
             } else if (c2) {
-                return STATE_NARROW_PASSAGE_SHIFT_LEFT; // Doorway clearer on left
+                return STATE_NARROW_PASSAGE_SHIFT_LEFT;
             } else if (c4) {
-                return STATE_NARROW_PASSAGE_SHIFT_RIGHT; // Doorway clearer on right
+                return STATE_NARROW_PASSAGE_SHIFT_RIGHT;
             } else {
                 return STATE_NARROW_PASSAGE_CENTER;
             }

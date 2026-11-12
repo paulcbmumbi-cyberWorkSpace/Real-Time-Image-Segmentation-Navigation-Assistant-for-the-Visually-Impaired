@@ -12,14 +12,12 @@ import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
-
 public class ImageSegmenter(private val activity: Activity) {
 
     companion object {
         const val TAG: String = "ImageSegmenter"
         /** Dimensions of inputs.  */
         const val DIM_BATCH_SIZE = 1
-
         const val DIM_PIXEL_SIZE = 3
     }
 
@@ -50,25 +48,23 @@ public class ImageSegmenter(private val activity: Activity) {
                     "dpc_voc_trainaug", Model.Dataset.PASCAL,
                     225, 225, 225, 225
             )
-
     )
 
     private var currentModelIndex = 0
-
     private var tflite: Interpreter? = null
 
     private lateinit var imgData: ByteBuffer
-
     private lateinit var segmentedImage: ByteBuffer
 
     init {
+        tfliteOptions.setNumThreads(4) // Utilize 4 CPU threads for fast inference
         loadModel(0)
         Log.d(TAG, "Created a Tensorflow Lite Image Segmenter.")
     }
 
     fun changeModel() {
         close()
-        currentModelIndex = ++currentModelIndex % modelList.size
+        currentModelIndex = (currentModelIndex + 1) % modelList.size
         loadModel(currentModelIndex)
     }
 
@@ -102,11 +98,6 @@ public class ImageSegmenter(private val activity: Activity) {
         intValues = IntArray(model.inputWidth * model.inputHeight)
     }
 
-    // fun setUseNNAPI(nnapi: Boolean) {
-    //     tfliteOptions.setUseNNAPI(nnapi)
-    //     recreateInterpreter()
-    // }
-
     fun setNumThreads(numThreads: Int) {
         tfliteOptions.setNumThreads(numThreads)
         recreateInterpreter()
@@ -131,26 +122,26 @@ public class ImageSegmenter(private val activity: Activity) {
 
     private fun convertBitmapToByteBuffer(bitmap: Bitmap) {
         imgData.rewind()
-
         bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        // Convert the image to floating point.
+
+        // Convert image to normalized float range [0.0f..1.0f] for accurate neural network prediction
         for (pixel in 0 until intValues.size) {
             val value = intValues[pixel]
+            val r = ((value shr 16 and 0xff).toFloat() / 255.0f)
+            val g = ((value shr 8 and 0xff).toFloat() / 255.0f)
+            val b = ((value and 0xff).toFloat() / 255.0f)
 
-            imgData.apply {
-                putFloat((value shr 16 and 0xff).toFloat())
-                putFloat((value shr 8 and 0xff).toFloat())
-                putFloat((value and 0xff).toFloat())
-            }
+            imgData.putFloat(r)
+            imgData.putFloat(g)
+            imgData.putFloat(b)
         }
     }
-
 
     private fun getModelPath(): String = "${modelList[currentModelIndex].path}.tflite"
 
     private fun getNumBytesPerChannel(): Int = 4
 
-        fun segmentFrame(bitmap: Bitmap): IntArray {
+    fun segmentFrame(bitmap: Bitmap): IntArray {
         if (tflite == null) {
             Log.e(TAG, "Image segmenter has not been initialized; Skipped.")
             return outFrame
